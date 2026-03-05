@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
 S&P 500 Mean Reversion Scanner
-Identifica azioni in ipervendute che potrebbero rimbalzare verso la media mobile
-Analizza tutte le 503 azioni S&P500 ordinate per market cap
+Identifica azioni con:
+- RSI < 30 (ipervenduto)
+- Prezzo vicino alla banda inferiore di Bollinger
+Fornisce SL, TP e Rischio/Rendimento
 """
 
 import yfinance as yf
@@ -54,21 +56,51 @@ def send_telegram_message(message):
     except Exception as e:
         print(f"❌ Errore invio Telegram: {e}")
 
-def calculate_sl_tp(price, ma20, lookback_low):
+def calculate_rsi(prices, period=14):
+    """Calcola l'RSI con metodo Wilder (standard)"""
+    delta = prices.diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    
+    # Wilder's smoothing (exponential weighted moving average)
+    alpha = 1 / period
+    avg_gain = gain.ewm(alpha=alpha, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=alpha, adjust=False).mean()
+    
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calculate_bollinger_bands(prices, window=20, num_std=2):
+    """Calcola le Bande di Bollinger"""
+    sma = prices.rolling(window=window).mean()
+    std = prices.rolling(window=window).std()
+    upper_band = sma + (std * num_std)
+    lower_band = sma - (std * num_std)
+    return upper_band, lower_band, sma
+
+def calculate_sl_tp(price, lower_bb, ma20):
     """Calcola Stop Loss e Take Profit per setup mean reversion"""
-    sl = lookback_low * 0.99
+    # SL sotto la banda inferiore di Bollinger
+    sl = lower_bb * 0.98
     if sl >= price:
-        sl = price * 0.98
+        sl = price * 0.97
+    
+    # TP alla media mobile (MA20)
     tp = ma20
+    
     risk = price - sl
     rr_ratio = (tp - price) / risk if risk > 0 else 0
+    
     return round(sl, 2), round(tp, 2), round(rr_ratio, 2)
 
-def get_mean_reversion_stocks(tickers, lookback_days=20, oversold_threshold=-0.05):
-    """Trova stock in ipervenduta (sotto la media mobile)"""
+def get_mean_reversion_stocks(tickers, lookback_days=60, rsi_threshold=30):
+    """Trova stock con setup mean reversion: RSI < 30 e prezzo vicino lower BB"""
     mean_reversions = []
     
     print(f"📊 Scanning {len(tickers)} tickers for mean reversion...")
+    print(f"   Filtri: RSI < {rsi_threshold}, prezzo vicino lower BB")
+    print()
     
     for i, ticker in enumerate(tickers):
         if (i + 1) % 50 == 0:
@@ -76,46 +108,64 @@ def get_mean_reversion_stocks(tickers, lookback_days=20, oversold_threshold=-0.0
         
         try:
             stock = yf.Ticker(ticker)
-            hist = stock.history(period=f"{lookback_days+10}d", interval='1d')
+            hist = stock.history(period=f"{lookback_days}d", interval='1d')
             
-            if len(hist) < lookback_days:
+            if len(hist) < 30:
                 continue
             
-            hist['MA20'] = hist['Close'].rolling(window=lookback_days).mean()
+            # Calcola RSI con metodo Wilder
+            hist['RSI'] = calculate_rsi(hist['Close'])
+            
+            # Calcola Bollinger Bands
+            hist['BB_Upper'], hist['BB_Lower'], hist['MA20'] = calculate_bollinger_bands(hist['Close'])
             
             current_price = hist['Close'].iloc[-1]
+            current_rsi = hist['RSI'].iloc[-1]
+            lower_bb = hist['BB_Lower'].iloc[-1]
+            upper_bb = hist['BB_Upper'].iloc[-1]
             ma20 = hist['MA20'].iloc[-1]
             
-            # Controlla se è sotto la MA (ipervenduto)
-            if current_price < ma20 * (1 + oversold_threshold):
-                pct_below_ma = ((ma20 - current_price) / ma20) * 100
-                
-                momentum = 0
-                if len(hist) >= 5:
-                    momentum = ((hist['Close'].iloc[-1] - hist['Close'].iloc[-5]) / hist['Close'].iloc[-5]) * 100
-                
-                low_20d = hist['Low'].iloc[-lookback_days:].min()
-                sl, tp, rr = calculate_sl_tp(current_price, ma20, low_20d)
-                
-                # Ottieni market cap
-                try:
-                    info = stock.info
-                    market_cap = info.get('marketCap', 0) or 0
-                except:
-                    market_cap = 0
-                
-                mean_reversions.append({
-                    'Ticker': ticker,
-                    'Price': round(current_price, 2),
-                    'MA20': round(ma20, 2),
-                    'Below MA %': round(pct_below_ma, 2),
-                    'Momentum 5d %': round(momentum, 2),
-                    'MarketCap': market_cap,
-                    'SL': sl,
-                    'TP': tp,
-                    'RR': rr
-                })
-                
+            # Filtro 1: RSI < 30
+            if current_rsi >= rsi_threshold:
+                continue
+            
+            # Filtro 2: prezzo vicino alla banda inferiore (entro 5% sopra)
+            if current_price > lower_bb * 1.05:
+                continue
+            
+            # Calcola distanza dalla lower BB
+            pct_from_lower_bb = ((current_price - lower_bb) / lower_bb) * 100
+            
+            # Calcola SL, TP, R/R
+            sl, tp, rr = calculate_sl_tp(current_price, lower_bb, ma20)
+            
+            # Momentum 5 giorni
+            momentum = 0
+            if len(hist) >= 5:
+                momentum = ((hist['Close'].iloc[-1] - hist['Close'].iloc[-5]) / hist['Close'].iloc[-5]) * 100
+            
+            # Ottieni market cap
+            try:
+                info = stock.info
+                market_cap = info.get('marketCap', 0) or 0
+            except:
+                market_cap = 0
+            
+            mean_reversions.append({
+                'Ticker': ticker,
+                'Price': round(current_price, 2),
+                'RSI': round(current_rsi, 2),
+                'BB_Lower': round(lower_bb, 2),
+                'BB_Upper': round(upper_bb, 2),
+                'MA20': round(ma20, 2),
+                'Dist Lower BB %': round(pct_from_lower_bb, 2),
+                'Momentum 5d %': round(momentum, 2),
+                'MarketCap': market_cap,
+                'SL': sl,
+                'TP': tp,
+                'RR': rr
+            })
+            
         except Exception as e:
             continue
     
@@ -123,7 +173,8 @@ def get_mean_reversion_stocks(tickers, lookback_days=20, oversold_threshold=-0.0
 
 def main():
     print("=" * 60)
-    print("🔍 S&P 500 MEAN REVERSION SCANNER (FULL)")
+    print("🔍 S&P 500 MEAN REVERSION SCANNER")
+    print("   RSI < 30 + prezzo vicino Lower BB")
     print("=" * 60)
     print(f"Data: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print()
@@ -133,37 +184,43 @@ def main():
     
     if mean_reversions:
         df = pd.DataFrame(mean_reversions)
-        # Ordina per market cap (più importanti prima)
-        df = df.sort_values('MarketCap', ascending=False)
+        # Ordina per R/R ratio (migliori prima)
+        df = df.sort_values('RR', ascending=False)
         
         print(f"\n✅ Trovati {len(mean_reversions)} Mean Reversion:\n")
-        print("=" * 60)
+        print("=" * 70)
         
         for _, row in df.head(20).iterrows():
-            mcap_b = row['MarketCap'] / 1e9 if row['MarketCap'] > 0 else 0
-            print(f"📉 {row['Ticker']:6s} | ${row['Price']:8.2f} | MA20: ${row['MA20']:7.2f} | -{row['Below MA %']:5.2f}% | MCap: ${mcap_b:.0f}B | SL: ${row['SL']:.2f} | TP: ${row['TP']:.2f} | R/R: {row['RR']}:1")
+            print(f"📉 {row['Ticker']:5s} | ${row['Price']:7.2f} | RSI: {row['RSI']:5.2f} | Lower BB: ${row['BB_Lower']:.2f} | Dist: {row['Dist Lower BB %']:+.2f}%")
+            print(f"   🛡️ SL: ${row['SL']} | 🎯 TP: ${row['TP']} | ⚖️ R/R: {row['RR']}:1")
+            print()
         
-        print("\n" + "=" * 60)
-        
-        # Format output per Telegram (top 15 per market cap)
+        # Prepara messaggio Telegram
         msg = f"📊 *S&P 500 Mean Reversion Scanner*\n_{datetime.now().strftime('%d/%m/%Y %H:%M')}_\n\n"
-        msg += f"*✅ {len(mean_reversions)} Setup Mean Reversion:*\n\n"
+        msg += f"*Filtri:* RSI < 30 + prezzo vicino Lower BB\n\n"
+        msg += f"*✅ {len(mean_reversions)} Setup Trovati:*\n\n"
         
         for _, row in df.head(15).iterrows():
-            emoji = "⚠️" if row['Below MA %'] > 8 else "📉"
-            msg += f"{emoji} *{row['Ticker']}* ${row['Price']:.2f}\n"
-            msg += f"   MA20: ${row['MA20']:.2f} | -{row['Below MA %']:.1f}%\n"
-            msg += f"   🛡️ SL: ${row['SL']:.2f} | 🎯 TP: ${row['TP']:.2f} | ⚖️ R/R: {row['RR']}:1\n\n"
+            emoji = "⚠️" if row['RR'] < 1.5 else "📉"
+            msg += f"{emoji} *{row['Ticker']}* ${row['Price']}\n"
+            msg += f"   RSI: {row['RSI']} | Lower BB: ${row['BB_Lower']} | {row['Dist Lower BB %']:+.1f}%\n"
+            msg += f"   🛡️ SL: ${row['SL']} | 🎯 TP: ${row['TP']} | ⚖️ R/R: {row['RR']}:1\n\n"
         
         if len(mean_reversions) > 15:
             msg += f"_...e altri {len(mean_reversions) - 15} setup_"
         
+        send_telegram_message(msg)
+        
     else:
-        msg = "📊 *S&P 500 Mean Reversion Scanner*\n_{}_\n\nNessun setup mean reversion trovato oggi.".format(datetime.now().strftime('%d/%m/%Y %H:%M'))
+        print("❌ Nessun setup mean reversion trovato oggi.")
+        msg = f"📊 *S&P 500 Mean Reversion Scanner*\n_{datetime.now().strftime('%d/%m/%Y %H:%M')}_\n\n"
+        msg += "Nessun setup trovato (RSI < 30 + prezzo vicino Lower BB)"
+        send_telegram_message(msg)
     
-    print("\n" + msg)
-    send_telegram_message(msg)
-    return msg
+    # Salva risultati
+    if mean_reversions:
+        df.to_csv('mean_reversion_sp500_results.csv', index=False)
+        print(f"\n💾 Risultati salvati in mean_reversion_sp500_results.csv")
 
 if __name__ == "__main__":
     main()
