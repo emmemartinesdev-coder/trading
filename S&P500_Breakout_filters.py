@@ -145,6 +145,11 @@ def find_breakout(df, lookback=20):
             if pd.isna(sma20):
                 continue
             
+            # Verifica che SMA20 > SMA50 (trend rialzista)
+            sma50 = df['SMA50'].iloc[-1] if not pd.isna(df['SMA50'].iloc[-1]) else None
+            if sma50 is None or sma20 <= sma50:
+                continue
+            
             # Il prezzo attuale è sotto il massimo del breakout?
             if current_close < breakout_high:
                 # Entro il 5% della SMA20?
