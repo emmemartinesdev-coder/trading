@@ -11,9 +11,9 @@ export TELEGRAM_CHAT_ID="494745285"
 source venv_trading/bin/activate
 
 echo "=== $(date) - Running Mean Reversion Scanner ==="
-python sp500_mean_reversion_scanner.py
+python scripts/strategies/S&P500_Mean_Reversion_scanner.py
 
 echo "=== $(date) - Running Breakout Scanner (Advanced) ==="
-python "S&P500_Breakout_filters.py"
+python scripts/strategies/S&P500_Breakout_filters.py
 
 echo "=== $(date) - Scanners completed ==="
