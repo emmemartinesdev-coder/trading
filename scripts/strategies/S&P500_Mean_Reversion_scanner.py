@@ -14,9 +14,10 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# Telegram config
-TELEGRAM_BOT_TOKEN = "8356765226:AAHJCAziToDKteBti2JkN3yaHy0No_2FEs0"
-TELEGRAM_CHAT_ID = "494745285"
+# Telegram config (usa variabili d'ambiente o valori di default)
+import os
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8475258962:AAG46md8dRyuL4Koh6YsEyaby7VwKvtj0S4")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "494745285")
 
 def load_sp500_tickers():
     """Carica la lista S&P500 da file o da Wikipedia"""

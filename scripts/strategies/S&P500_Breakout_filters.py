@@ -17,8 +17,8 @@ import os
 import sys
 
 # ================== CONFIGURAZIONE ==================
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8475258962:AAG46md8dRyuL4Koh6YsEyaby7VwKvtj0S4")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "494745285")
 EMAIL_ENABLED = os.environ.get("EMAIL_ENABLED", "false").lower() == "true"
 EMAIL_SENDER = os.environ.get("EMAIL_SENDER", "")
 EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "")
