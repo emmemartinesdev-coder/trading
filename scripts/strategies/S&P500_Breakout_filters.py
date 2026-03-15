@@ -35,19 +35,30 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # ================== FUNZIONI UTILITY ==================
 
 def get_sp500_tickers():
-    """Recupera la lista dei ticker S&P500 da Wikipedia"""
+    """Recupera la lista dei ticker S&P500 da file locale o Wikipedia"""
+    
+    # Prima prova a leggere da file locale
+    ticker_file = "sp500_tickers.json"
+    if os.path.exists(ticker_file):
+        try:
+            import json
+            with open(ticker_file, 'r') as f:
+                tickers = json.load(f)
+            print(f"✅ Caricati {len(tickers)} ticker da file locale")
+            return [(t, t) for t in tickers]  # Return as (ticker, ticker) pairs
+        except Exception as e:
+            print(f"⚠️ Errore lettura file locale: {e}")
+    
+    # Fallback: Wikipedia
     print("📥 Recupero lista S&P500 da Wikipedia...")
     
     try:
-        # Leggi la tabella da Wikipedia
         tables = pd.read_html(SP500_WIKIPEDIA_URL)
         df = tables[0]
         
-        # Estrai ticker e nome
         tickers = df['Symbol'].tolist()
         names = df['Security'].tolist()
         
-        # Pulisci i ticker (rimuovi spazi, caratteri speciali)
         cleaned_tickers = []
         cleaned_names = []
         for t, n in zip(tickers, names):
@@ -61,7 +72,6 @@ def get_sp500_tickers():
     
     except Exception as e:
         print(f"❌ Errore nel recupero lista: {e}")
-        # Fallback: lista manuale di alcuni ticker principali
         return [
             ("AAPL", "Apple Inc."),
             ("MSFT", "Microsoft Corporation"),
@@ -150,12 +160,12 @@ def find_breakout(df, lookback=20):
             if sma50 is None or sma20 <= sma50:
                 continue
             
-            # Il prezzo attuale è sotto il massimo del breakout?
+            # Il prezzo attuale è vicino alla SMA20 (tra -1% e +1%)?
             if current_close < breakout_high:
-                # Entro il 5% della SMA20?
-                deviation_pct = abs(current_close - sma20) / sma20 * 100
+                deviation_pct = (current_close - sma20) / sma20 * 100  # positivo se sopra, negativo se sotto
                 
-                if deviation_pct <= 5:
+                # Vicino alla SMA20: tra -1% e +1%
+                if -1.0 <= deviation_pct <= 1.0:
                     return {
                         'breakout_date': breakout_date,
                         'breakout_high': breakout_high,
@@ -407,12 +417,13 @@ def main():
             
             results.append(result)
             
-            # Formatta e stampa alert
+            # Formatta e stampa alert (solo console, non Telegram)
             alert = format_alert(ticker, name, breakout_data, volume_signal, rsi_signal, adx_signal, classification)
             print(alert)
             
-            # Invia notifiche
-            send_telegram_alert(alert)
+            # Invia SOLO RIMBALZO_SMA20 via Telegram
+            if 'RIMBALZO_SMA20' in classification:
+                send_telegram_alert(alert)
             
         except Exception as e:
             errors.append(f"{ticker}: {str(e)}")
@@ -436,33 +447,19 @@ def main():
     csv_filename = os.path.join(OUTPUT_DIR, f"sp500_breakout_alerts_{today}.csv")
     save_to_csv(results, csv_filename)
     
-    # Invia riepilogo se ci sono risultati
+    # Invia riepilogo SOLO con RIMBALZO_SMA20
     if results:
-        summary = f"🔔 <b>S&P 500 Breakout Scanner</b>\n\n"
-        summary += f"📅 {datetime.now().strftime('%Y-%m-%d')}\n"
-        summary += f"✅ Breakout trovati: {len(results)}\n\n"
-        
-        # Raggruppa per classificazione
         green = [r for r in results if 'RIMBALZO_SMA20' in r['classification']]
-        yellow = [r for r in results if 'INCERTO' in r['classification']]
-        red = [r for r in results if 'VERSO_SMA50' in r['classification']]
         
         if green:
-            summary += f"🟢 RIMBALZO_SMA20: {len(green)}\n"
-            for r in green[:3]:
-                summary += f"  • {r['ticker']}: ${r['data']['current_close']:.2f}\n"
-        
-        if yellow:
-            summary += f"\n🟡 INCERTO: {len(yellow)}\n"
-            for r in yellow[:3]:
-                summary += f"  • {r['ticker']}: ${r['data']['current_close']:.2f}\n"
-        
-        if red:
-            summary += f"\n🔴 VERSO_SMA50: {len(red)}\n"
-            for r in red[:3]:
-                summary += f"  • {r['ticker']}: ${r['data']['current_close']:.2f}\n"
-        
-        send_telegram_alert(summary)
+            summary = f"🔔 <b>S&P 500 Breakout Scanner - RIMBALZO_SMA20</b>\n\n"
+            summary += f"📅 {datetime.now().strftime('%Y-%m-%d')}\n"
+            summary += f"🟢 Setup RIMBALZO_SMA20 trovati: {len(green)}\n\n"
+            
+            for r in green:
+                summary += f"• {r['ticker']}: ${r['data']['current_close']:.2f} (SMA20={r['data']['sma20']:.2f} > SMA50={r['data']['sma50']:.2f})\n"
+            
+            send_telegram_alert(summary)
     
     print("\n✅ Scansione completata!")
     
