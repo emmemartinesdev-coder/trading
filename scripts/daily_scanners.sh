@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Daily scanners script - eseguito ogni mattina alle 6
+# Daily scanners script - eseguito ogni mattina alle 5 UTC
 cd /root/.openclaw/workspace
 
 # Configurazione Telegram

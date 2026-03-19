@@ -234,11 +234,17 @@ def format_alert(ticker, name, data, volume_signal, rsi_signal, adx_signal, clas
     """Formatta l'alert per la stampa"""
     breakout_date = data['breakout_date'].strftime('%Y-%m-%d') if hasattr(data['breakout_date'], 'strftime') else str(data['breakout_date'])
     
+    # Calcola SL e TP basati sui parametri ottimizzati
+    entry_price = data['current_close']
+    sl_price = entry_price * (1 - STOP_LOSS_PCT)
+    tp_price = entry_price * (1 + TAKE_PROFIT_PCT)
+    rr_ratio = (tp_price - entry_price) / (entry_price - sl_price)
+    
     alert = f"""
 ==================================================
 🔔 ALERT: {ticker} — {name}
 ==================================================
-Prezzo attuale: ${data['current_close']:.2f}
+Prezzo attuale: ${entry_price:.2f}
 SMA20: ${data['sma20']:.2f}
 SMA50: ${data['sma50']:.2f}
 Data breakout: {breakout_date}
@@ -248,6 +254,10 @@ Massimo breakout: ${data['breakout_high']:.2f}
 Volume: {volume_signal}
 RSI(14): {data['rsi']:.2f} → {rsi_signal}
 ADX(14): {data['adx']:.2f} → {adx_signal}
+
+🛡️ STOP LOSS: ${sl_price:.2f} (-{STOP_LOSS_PCT*100:.0f}%)
+🎯 TAKE PROFIT: ${tp_price:.2f} (+{TAKE_PROFIT_PCT*100:.0f}%)
+⚖️ R/R: {rr_ratio:.2f}:1
 
 🏁 Classificazione finale: {classification}
 ==================================================
@@ -341,9 +351,14 @@ def save_to_csv(results, filename):
 
 # ================== MAIN ==================
 
+# ================== PARAMETRI OTTIMIZZATI ==================
+STOP_LOSS_PCT = 0.03  # 3%
+TAKE_PROFIT_PCT = 0.06  # 6%
+# ============================================================
+
 def main():
     print("=" * 60)
-    print("🚀 S&P 500 BREAKOUT SCANNER")
+    print("🚀 S&P 500 BREAKOUT SCANNER (OTTIMIZZATO)")
     print(f"📅 Data: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
     
